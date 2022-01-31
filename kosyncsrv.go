@@ -114,7 +114,7 @@ func updateProgress(c *gin.Context) {
 func main() {
 	dbfile := flag.String("d", "syncdata.db", "Sqlite3 DB file name")
 	dbname = *dbfile
-	srvhost := flag.String("t", "127.0.0.1", "Server host")
+	srvhost := flag.String("t", "0.0.0.0", "Server host")
 	srvport := flag.Int("p", 8080, "Server port")
 	sslswitch := flag.Bool("ssl", false, "Start with https")
 	sslc := flag.String("c", "", "SSL Certificate file")
