@@ -22,7 +22,7 @@ type requestHeader struct {
 type requestPosition struct {
 	DocumentID string  `json:"document"`
 	Percentage float64 `json:"percentage"`
-	Progress   string  `json:"progress"`
+	Progress   int64   `json:"progress"`
 	Device     string  `json:"device"`
 	DeviceID   string  `json:"device_id"`
 }
