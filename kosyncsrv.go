@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
@@ -20,11 +22,11 @@ type requestHeader struct {
 }
 
 type requestPosition struct {
-	DocumentID string  `json:"document"`
-	Percentage float64 `json:"percentage"`
-	Progress   string  `json:"progress"`
-	Device     string  `json:"device"`
-	DeviceID   string  `json:"device_id"`
+	DocumentID string   `json:"document"`
+	Percentage float64  `json:"percentage"`
+	Progress   stringOrInt `json:"progress"`
+	Device     string   `json:"device"`
+	DeviceID   string   `json:"device_id"`
 }
 
 type replayPosition struct {
@@ -34,6 +36,34 @@ type replayPosition struct {
 
 type requestDocid struct {
 	DocumentID string `uri:"document" bingding:"required"`
+}
+
+// Depending on wheather the document has pages, Koreader may send progress as a string or int.
+// This is a helper type to facilicate marshaling and unmarshaling.
+type stringOrInt struct {
+	innner string
+}
+
+func (s *stringOrInt) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.innner)
+}
+
+func (s *stringOrInt) UnmarshalJSON(b []byte) error {
+	var i int
+	err := json.Unmarshal(b, &i)
+	if err == nil {
+		*s = stringOrInt{strconv.Itoa(i)}
+		return nil
+	}
+
+	var ss string
+	err = json.Unmarshal(b, &ss)
+	if err == nil {
+		*s = stringOrInt{ss}
+		return nil
+	}
+
+	return err
 }
 
 func register(c *gin.Context) {

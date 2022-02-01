@@ -89,7 +89,7 @@ func getDBPosition(username string, documentid string) requestPosition {
 	}
 	rPos.DocumentID = documentid
 	rPos.Percentage = resultDBdoc.Percentage
-	rPos.Progress = resultDBdoc.Progress
+	rPos.Progress = stringOrInt{resultDBdoc.Progress}
 	rPos.Device = resultDBdoc.Device
 	rPos.DeviceID = resultDBdoc.DeviceID
 	return rPos
@@ -113,7 +113,7 @@ func updateDBdocument(username string, rPos requestPosition) int64 {
 		_, err := db.NamedExec("UPDATE document set username=:user, percentage=:perc, progress=:prog, timestamp=:time WHERE documentid=:docid AND device_id=:devid", map[string]interface{}{
 			"user":  username,
 			"perc":  rPos.Percentage,
-			"prog":  rPos.Progress,
+			"prog":  rPos.Progress.innner,
 			"time":  nowtime,
 			"docid": rPos.DocumentID,
 			"devid": rPos.DeviceID,
@@ -127,7 +127,7 @@ func updateDBdocument(username string, rPos requestPosition) int64 {
 		"user":  username,
 		"docid": rPos.DocumentID,
 		"perc":  rPos.Percentage,
-		"prog":  rPos.Progress,
+		"prog":  rPos.Progress.innner,
 		"dev":   rPos.Device,
 		"devid": rPos.DeviceID,
 		"time":  nowtime,
