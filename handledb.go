@@ -40,7 +40,7 @@ type dbDocument struct {
 	Username   string  `db:"username"`
 	DocumentID string  `db:"documentid"`
 	Percentage float64 `db:"percentage"`
-	Progress   int64   `db:"progress"`
+	Progress   string  `db:"progress"`
 	Device     string  `db:"device"`
 	DeviceID   string  `db:"device_id"`
 	Timestamp  int64   `db:"timestamp"`
