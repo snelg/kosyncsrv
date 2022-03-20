@@ -1,7 +1,7 @@
 FROM golang:alpine AS builder
 
 RUN apk add --no-cache sqlite-libs sqlite-dev
-RUN apk add --no-cache build-base
+RUN apk add --no-cache build-base git
 
 WORKDIR /app
 
