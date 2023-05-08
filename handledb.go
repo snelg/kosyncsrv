@@ -80,24 +80,26 @@ func addDBUser(username string, password string) bool {
 	return false
 }
 
-func getDBPosition(username string, documentid string) requestPosition {
+func getDBPosition(username string, documentid string) (requestPosition, error) {
 	var rPos requestPosition
 	var resultDBdoc dbDocument
 	err := db.Get(&resultDBdoc, "SELECT * FROM document WHERE document.username=$1 AND document.documentid=$2 ORDER BY document.timestamp DESC", username, documentid)
 	if err != nil {
 		log.Println(err)
+		return rPos, err
 	}
+	rPos.Timestamp = resultDBdoc.Timestamp
 	rPos.DocumentID = documentid
 	rPos.Percentage = resultDBdoc.Percentage
 	rPos.Progress = stringOrInt{resultDBdoc.Progress}
 	rPos.Device = resultDBdoc.Device
 	rPos.DeviceID = resultDBdoc.DeviceID
-	return rPos
+	return rPos, err
 }
 
-func existDoc(docid string, devid string) bool {
+func existDoc(username string, docid string) bool {
 	var result dbDocument
-	err := db.Get(&result, "SELECT * FROM document WHERE documentid=$1 AND device_id=$2", docid, devid)
+	err := db.Get(&result, "SELECT * FROM document WHERE username=$1 AND documentid=$2", username, docid)
 	if err != nil {
 		log.Println(err)
 		if err == sql.ErrNoRows {
@@ -109,14 +111,15 @@ func existDoc(docid string, devid string) bool {
 
 func updateDBdocument(username string, rPos requestPosition) int64 {
 	nowtime := time.Now().Unix()
-	if existDoc(rPos.DocumentID, rPos.DeviceID) {
-		_, err := db.NamedExec("UPDATE document set username=:user, percentage=:perc, progress=:prog, timestamp=:time WHERE documentid=:docid AND device_id=:devid", map[string]interface{}{
-			"user":  username,
-			"perc":  rPos.Percentage,
-			"prog":  rPos.Progress.innner,
-			"time":  nowtime,
-			"docid": rPos.DocumentID,
-			"devid": rPos.DeviceID,
+	if existDoc(username, rPos.DocumentID) {
+		_, err := db.NamedExec("UPDATE document set percentage=:perc, progress=:prog, device=:device, device_id=:devid, timestamp=:time WHERE username=:user AND documentid=:docid", map[string]interface{}{
+			"perc":   rPos.Percentage,
+			"prog":   rPos.Progress.inner,
+			"device": rPos.Device,
+			"devid":  rPos.DeviceID,
+			"time":   nowtime,
+			"user":   username,
+			"docid":  rPos.DocumentID,
 		})
 		if err != nil {
 			log.Fatalln(err)
@@ -127,7 +130,7 @@ func updateDBdocument(username string, rPos requestPosition) int64 {
 		"user":  username,
 		"docid": rPos.DocumentID,
 		"perc":  rPos.Percentage,
-		"prog":  rPos.Progress.innner,
+		"prog":  rPos.Progress.inner,
 		"dev":   rPos.Device,
 		"devid": rPos.DeviceID,
 		"time":  nowtime,
