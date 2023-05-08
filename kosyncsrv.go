@@ -22,11 +22,11 @@ type requestHeader struct {
 }
 
 type requestPosition struct {
-	DocumentID string   `json:"document"`
-	Percentage float64  `json:"percentage"`
+	DocumentID string      `json:"document"`
+	Percentage float64     `json:"percentage"`
 	Progress   stringOrInt `json:"progress"`
-	Device     string   `json:"device"`
-	DeviceID   string   `json:"device_id"`
+	Device     string      `json:"device"`
+	DeviceID   string      `json:"device_id"`
 }
 
 type replayPosition struct {
@@ -44,7 +44,7 @@ type stringOrInt struct {
 	innner string
 }
 
-func (s *stringOrInt) MarshalJSON() ([]byte, error) {
+func (s stringOrInt) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.innner)
 }
 
