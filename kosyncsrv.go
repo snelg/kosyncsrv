@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -41,8 +42,28 @@ type requestDocid struct {
 	DocumentID string `uri:"document" binding:"required"`
 }
 
-// Depending on wheather the document has pages, Koreader may send progress as a string or int.
-// This is a helper type to facilicate marshaling and unmarshaling.
+type errorResponse struct {
+	Status  int
+	Code    int
+	Message string
+}
+
+func (err errorResponse) Error() string {
+	return err.Message
+}
+
+var (
+	InvalidHeader             = errorResponse{http.StatusBadRequest, 100, "Invalid Header"}
+	InvalidAcceptHeader       = errorResponse{http.StatusPreconditionFailed, 101, "Invalid Accept header format."}
+	UnknownServerError        = errorResponse{http.StatusInternalServerError, 500, "Unknown server error."}
+	Unauthorized              = errorResponse{http.StatusUnauthorized, 2001, "Unauthorized"}
+	UsernameAlreadyRegistered = errorResponse{http.StatusForbidden, 2002, "Username is already registered."}
+	InvalidRequest            = errorResponse{http.StatusForbidden, 2003, "Invalid Request"}
+	DocumentIdNotProvided     = errorResponse{http.StatusForbidden, 2004, "Field 'document' not provided."}
+)
+
+// Depending on whether the document has pages, Koreader may send progress as a string or int.
+// This is a helper type to facilitate marshaling and unmarshaling.
 type stringOrInt struct {
 	inner string
 }
@@ -76,16 +97,16 @@ func validKeyField(field string) bool {
 func register(c *gin.Context) {
 	var rUser requestUser
 	if err := c.ShouldBindJSON(&rUser); err != nil {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 2003, "message": "Invalid request"})
+		c.Error(InvalidRequest)
 		return
 	}
 
 	if rUser.Username == "" || rUser.Password == "" {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 2003, "message": "Invalid request"})
+		c.Error(InvalidRequest)
 		return
 	}
 	if !addDBUser(rUser.Username, rUser.Password) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 2002, "message": "Username is already registered."})
+		c.Error(UsernameAlreadyRegistered)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{
@@ -100,10 +121,10 @@ func authorize(c *gin.Context) {
 }
 
 func getProgress(c *gin.Context) {
-	username := c.MustGet("username").(string)
+	username := c.MustGet("header").(requestHeader).AuthUser
 	var rDocid requestDocid
 	if err := c.ShouldBindUri(&rDocid); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"msg": err})
+		c.Error(UnknownServerError)
 		return
 	}
 	position, err := getDBPosition(username, rDocid.DocumentID)
@@ -115,20 +136,20 @@ func getProgress(c *gin.Context) {
 }
 
 func updateProgress(c *gin.Context) {
-	username := c.MustGet("username").(string)
+	username := c.MustGet("header").(requestHeader).AuthUser
 	var rPosition requestPosition
 	var reply replyPosition
 
 	if err := c.ShouldBindJSON(&rPosition); err != nil {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 2003, "message": "Invalid request, ddue"})
+		c.Error(InvalidRequest)
 		return
 	}
 	if !validKeyField(rPosition.DocumentID) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 2004, "message": "Field 'document' not provided."})
+		c.Error(DocumentIdNotProvided)
 		return
 	}
 	if rPosition.Progress.inner == "" || rPosition.Device == "" {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 2003, "message": "Invalid request"})
+		c.Error(InvalidRequest)
 		return
 	}
 	updatetime := updateDBdocument(username, rPosition)
@@ -137,48 +158,44 @@ func updateProgress(c *gin.Context) {
 	c.JSON(http.StatusOK, reply)
 }
 
-func AcceptHeaderCheck() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var header requestHeader
-		if err := c.ShouldBindHeader(&header); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    100,
-				"message": "Invalid Header",
-			})
-			c.Abort()
-			return
-		}
-		if header.Accept == "application/vnd.koreader.v1+json" {
-			c.Next()
-			return
-		}
-		c.JSON(http.StatusPreconditionFailed, gin.H{
-			"code":    101,
-			"message": "Invalid Accept header format.",
-		})
-		c.Abort()
+func ErrorHandler(c *gin.Context) {
+	c.Next()
+	var err errorResponse
+	// Code is set up to only return one error
+	if len(c.Errors) > 0 && errors.As(c.Errors[0].Err, &err) {
+		c.AbortWithStatusJSON(err.Status, gin.H{"code": err.Code, "message": err.Message})
 	}
 }
 
-func AuthRequired() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var header requestHeader
-		unauthorizedError := gin.H{
-			"code":    2001,
-			"message": "Unauthorized",
-		}
-		_ = c.ShouldBindHeader(&header) // Ignore error handling, because we already did same binding in AcceptHeaderCheck
-		if validKeyField(header.AuthUser) && len(header.AuthKey) > 0 {
-			dUser, norows := getDBUser(header.AuthUser)
-			if !norows && header.AuthKey == dUser.Password {
-				c.Set("username", header.AuthUser)
-				c.Next()
-				return
-			}
-		}
-
-		c.AbortWithStatusJSON(http.StatusUnauthorized, unauthorizedError)
+func AcceptHeaderCheck(c *gin.Context) {
+	var header requestHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		c.Error(InvalidHeader)
+		c.Abort()
+		return
 	}
+	if header.Accept == "application/vnd.koreader.v1+json" {
+		c.Set("header", header)
+		c.Next()
+		return
+	}
+	c.Error(InvalidAcceptHeader)
+	c.Abort()
+}
+
+func AuthRequired(c *gin.Context) {
+	header := c.MustGet("header").(requestHeader)
+	if validKeyField(header.AuthUser) && len(header.AuthKey) > 0 {
+		dUser, norows := getDBUser(header.AuthUser)
+		if !norows && header.AuthKey == dUser.Password {
+			c.Set("username", header.AuthUser)
+			c.Next()
+			return
+		}
+	}
+
+	c.Error(Unauthorized)
+	c.Abort()
 }
 
 func main() {
@@ -198,12 +215,13 @@ func main() {
 	initDB()
 
 	router := gin.Default()
-	router.Use(AcceptHeaderCheck())
+	router.Use(ErrorHandler)
+	router.Use(AcceptHeaderCheck)
 	router.GET("/healthcheck", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"state": "OK"})
 	})
 	router.POST("/users/create", register)
-	authorized := router.Group("/", AuthRequired())
+	authorized := router.Group("/", AuthRequired)
 	{
 		authorized.GET("/users/auth", authorize)
 		authorized.GET("/syncs/progress/:document", getProgress)
