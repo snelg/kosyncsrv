@@ -48,7 +48,7 @@ type errorResponse struct {
 	Message string
 }
 
-func (err errorResponse) Error() string {
+func (err *errorResponse) Error() string {
 	return err.Message
 }
 
@@ -97,16 +97,16 @@ func validKeyField(field string) bool {
 func register(c *gin.Context) {
 	var rUser requestUser
 	if err := c.ShouldBindJSON(&rUser); err != nil {
-		c.Error(InvalidRequest)
+		c.Error(&InvalidRequest)
 		return
 	}
 
 	if rUser.Username == "" || rUser.Password == "" {
-		c.Error(InvalidRequest)
+		c.Error(&InvalidRequest)
 		return
 	}
 	if !addDBUser(rUser.Username, rUser.Password) {
-		c.Error(UsernameAlreadyRegistered)
+		c.Error(&UsernameAlreadyRegistered)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{
@@ -124,7 +124,7 @@ func getProgress(c *gin.Context) {
 	username := c.MustGet("header").(requestHeader).AuthUser
 	var rDocid requestDocid
 	if err := c.ShouldBindUri(&rDocid); err != nil {
-		c.Error(UnknownServerError)
+		c.Error(&UnknownServerError)
 		return
 	}
 	position, err := getDBPosition(username, rDocid.DocumentID)
@@ -141,15 +141,15 @@ func updateProgress(c *gin.Context) {
 	var reply replyPosition
 
 	if err := c.ShouldBindJSON(&rPosition); err != nil {
-		c.Error(InvalidRequest)
+		c.Error(&InvalidRequest)
 		return
 	}
 	if !validKeyField(rPosition.DocumentID) {
-		c.Error(DocumentIdNotProvided)
+		c.Error(&DocumentIdNotProvided)
 		return
 	}
 	if rPosition.Progress.inner == "" || rPosition.Device == "" {
-		c.Error(InvalidRequest)
+		c.Error(&InvalidRequest)
 		return
 	}
 	updatetime := updateDBdocument(username, rPosition)
@@ -160,8 +160,8 @@ func updateProgress(c *gin.Context) {
 
 func ErrorHandler(c *gin.Context) {
 	c.Next()
-	var err errorResponse
-	// Code is set up to only return one error
+	var err *errorResponse
+	// This specific project only returns one error per call, so we don't need to loop through all c.Errors
 	if len(c.Errors) > 0 && errors.As(c.Errors[0].Err, &err) {
 		c.AbortWithStatusJSON(err.Status, gin.H{"code": err.Code, "message": err.Message})
 	}
@@ -170,7 +170,7 @@ func ErrorHandler(c *gin.Context) {
 func AcceptHeaderCheck(c *gin.Context) {
 	var header requestHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.Error(InvalidHeader)
+		c.Error(&InvalidHeader)
 		c.Abort()
 		return
 	}
@@ -179,7 +179,7 @@ func AcceptHeaderCheck(c *gin.Context) {
 		c.Next()
 		return
 	}
-	c.Error(InvalidAcceptHeader)
+	c.Error(&InvalidAcceptHeader)
 	c.Abort()
 }
 
@@ -194,7 +194,7 @@ func AuthRequired(c *gin.Context) {
 		}
 	}
 
-	c.Error(Unauthorized)
+	c.Error(&Unauthorized)
 	c.Abort()
 }
 
