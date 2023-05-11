@@ -13,77 +13,68 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-type requestUser struct {
+type User struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-type requestHeader struct {
+type Header struct {
 	Accept   string `header:"accept"`
 	AuthUser string `header:"x-auth-user"`
 	AuthKey  string `header:"x-auth-key"`
 }
 
-type requestPosition struct {
-	Timestamp  int64       `json:"timestamp"`
-	DocumentID string      `json:"document"`
-	Progress   stringOrInt `json:"progress"`
-	Device     string      `json:"device"`
-	Percentage float64     `json:"percentage"`
-	DeviceID   string      `json:"device_id"`
+type Document struct {
+	DocumentId string       `json:"document" uri:"document" binding:"required"`
+	Progress   *StringOrInt `json:"progress"`
+	Device     string       `json:"device"`
+	Percentage float64      `json:"percentage"`
+	DeviceId   string       `json:"device_id"`
+	Timestamp  int64        `json:"timestamp"`
 }
 
-type replyPosition struct {
-	Timestamp  int64  `json:"timestamp"`
-	DocumentID string `json:"document"`
-}
-
-type requestDocid struct {
-	DocumentID string `uri:"document" binding:"required"`
-}
-
-type errorResponse struct {
+type ErrorResponse struct {
 	Status  int
 	Code    int
 	Message string
 }
 
-func (err *errorResponse) Error() string {
+func (err *ErrorResponse) Error() string {
 	return err.Message
 }
 
 var (
-	InvalidHeader             = errorResponse{http.StatusBadRequest, 100, "Invalid Header"}
-	InvalidAcceptHeader       = errorResponse{http.StatusPreconditionFailed, 101, "Invalid Accept header format."}
-	UnknownServerError        = errorResponse{http.StatusInternalServerError, 500, "Unknown server error."}
-	Unauthorized              = errorResponse{http.StatusUnauthorized, 2001, "Unauthorized"}
-	UsernameAlreadyRegistered = errorResponse{http.StatusForbidden, 2002, "Username is already registered."}
-	InvalidRequest            = errorResponse{http.StatusForbidden, 2003, "Invalid Request"}
-	DocumentIdNotProvided     = errorResponse{http.StatusForbidden, 2004, "Field 'document' not provided."}
+	InvalidHeader             = ErrorResponse{http.StatusBadRequest, 100, "Invalid Header"}
+	InvalidAcceptHeader       = ErrorResponse{http.StatusPreconditionFailed, 101, "Invalid Accept header format."}
+	UnknownServerError        = ErrorResponse{http.StatusInternalServerError, 500, "Unknown server error."}
+	Unauthorized              = ErrorResponse{http.StatusUnauthorized, 2001, "Unauthorized"}
+	UsernameAlreadyRegistered = ErrorResponse{http.StatusForbidden, 2002, "Username is already registered."}
+	InvalidRequest            = ErrorResponse{http.StatusForbidden, 2003, "Invalid Request"}
+	DocumentIdNotProvided     = ErrorResponse{http.StatusForbidden, 2004, "Field 'document' not provided."}
 )
 
-// Depending on whether the document has pages, Koreader may send progress as a string or int.
-// This is a helper type to facilitate marshaling and unmarshaling.
-type stringOrInt struct {
+// StringOrInt Depending on whether the document has pages, KOReader may send progress as a string or int.
+// This is a helper type to facilitate marshalling and unmarshalling.
+type StringOrInt struct {
 	inner string
 }
 
-func (s stringOrInt) MarshalJSON() ([]byte, error) {
+func (s *StringOrInt) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.inner)
 }
 
-func (s *stringOrInt) UnmarshalJSON(b []byte) error {
+func (s *StringOrInt) UnmarshalJSON(b []byte) error {
 	var i int
 	err := json.Unmarshal(b, &i)
 	if err == nil {
-		*s = stringOrInt{strconv.Itoa(i)}
+		*s = StringOrInt{strconv.Itoa(i)}
 		return nil
 	}
 
 	var ss string
 	err = json.Unmarshal(b, &ss)
 	if err == nil {
-		*s = stringOrInt{ss}
+		*s = StringOrInt{ss}
 		return nil
 	}
 
@@ -95,22 +86,22 @@ func validKeyField(field string) bool {
 }
 
 func register(c *gin.Context) {
-	var rUser requestUser
-	if err := c.ShouldBindJSON(&rUser); err != nil {
+	var user User
+	if err := c.ShouldBindJSON(&user); err != nil {
 		c.Error(&InvalidRequest)
 		return
 	}
 
-	if rUser.Username == "" || rUser.Password == "" {
+	if user.Username == "" || user.Password == "" {
 		c.Error(&InvalidRequest)
 		return
 	}
-	if !addDBUser(rUser.Username, rUser.Password) {
+	if !addDBUser(user.Username, user.Password) {
 		c.Error(&UsernameAlreadyRegistered)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{
-		"username": rUser.Username,
+		"username": user.Username,
 	})
 }
 
@@ -121,46 +112,52 @@ func authorize(c *gin.Context) {
 }
 
 func getProgress(c *gin.Context) {
-	username := c.MustGet("header").(requestHeader).AuthUser
-	var rDocid requestDocid
-	if err := c.ShouldBindUri(&rDocid); err != nil {
+	username := c.MustGet("header").(Header).AuthUser
+	var requestDocument Document
+	if err := c.ShouldBindUri(&requestDocument); err != nil {
 		c.Error(&UnknownServerError)
 		return
 	}
-	position, err := getDBPosition(username, rDocid.DocumentID)
+	document, err := getDBDocument(username, requestDocument.DocumentId)
 	if err != nil {
 		c.JSON(http.StatusOK, struct{}{})
 	} else {
-		c.JSON(http.StatusOK, position)
+		c.JSON(http.StatusOK, document)
 	}
 }
 
 func updateProgress(c *gin.Context) {
-	username := c.MustGet("header").(requestHeader).AuthUser
-	var rPosition requestPosition
-	var reply replyPosition
+	username := c.MustGet("header").(Header).AuthUser
+	var requestDocument Document
 
-	if err := c.ShouldBindJSON(&rPosition); err != nil {
+	if err := c.ShouldBindJSON(&requestDocument); err != nil {
+		// Semi-hacky; really should explicitly check if err is ValidationErrors and dig down in that
+		errorMessage := err.Error()
+		if strings.Contains(errorMessage, "DocumentId") && strings.Contains(errorMessage, "required") {
+			c.Error(&DocumentIdNotProvided)
+			return
+		}
 		c.Error(&InvalidRequest)
 		return
 	}
-	if !validKeyField(rPosition.DocumentID) {
+	if !validKeyField(requestDocument.DocumentId) {
 		c.Error(&DocumentIdNotProvided)
 		return
 	}
-	if rPosition.Progress.inner == "" || rPosition.Device == "" {
+	if requestDocument.Progress == nil || requestDocument.Device == "" {
 		c.Error(&InvalidRequest)
 		return
 	}
-	updatetime := updateDBdocument(username, rPosition)
-	reply.DocumentID = rPosition.DocumentID
-	reply.Timestamp = updatetime
-	c.JSON(http.StatusOK, reply)
+	timestamp := updateDBDocument(username, requestDocument)
+	c.JSON(http.StatusOK, gin.H{
+		"timestamp": timestamp,
+		"document":  requestDocument.DocumentId,
+	})
 }
 
 func ErrorHandler(c *gin.Context) {
 	c.Next()
-	var err *errorResponse
+	var err *ErrorResponse
 	// This specific project only returns one error per call, so we don't need to loop through all c.Errors
 	if len(c.Errors) > 0 && errors.As(c.Errors[0].Err, &err) {
 		c.AbortWithStatusJSON(err.Status, gin.H{"code": err.Code, "message": err.Message})
@@ -168,7 +165,7 @@ func ErrorHandler(c *gin.Context) {
 }
 
 func AcceptHeaderCheck(c *gin.Context) {
-	var header requestHeader
+	var header Header
 	if err := c.ShouldBindHeader(&header); err != nil {
 		c.Error(&InvalidHeader)
 		c.Abort()
@@ -184,10 +181,10 @@ func AcceptHeaderCheck(c *gin.Context) {
 }
 
 func AuthRequired(c *gin.Context) {
-	header := c.MustGet("header").(requestHeader)
+	header := c.MustGet("header").(Header)
 	if validKeyField(header.AuthUser) && len(header.AuthKey) > 0 {
-		dUser, norows := getDBUser(header.AuthUser)
-		if !norows && header.AuthKey == dUser.Password {
+		user, noRows := getDBUser(header.AuthUser)
+		if !noRows && header.AuthKey == user.Password {
 			c.Set("username", header.AuthUser)
 			c.Next()
 			return

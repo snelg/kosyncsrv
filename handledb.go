@@ -9,13 +9,14 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var schemaUser string = `
+var schemaUser = `
 CREATE TABLE IF NOT EXISTS "user" (
 	"username"  TEXT(255),
 	"password"  TEXT(255)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS username ON user(username);
 `
-var schemaDocument string = `
+var schemaDocument = `
 CREATE TABLE IF NOT EXISTS "document" (
 	"username"  TEXT(255),
 	"documentid"  TEXT(255),
@@ -24,25 +25,27 @@ CREATE TABLE IF NOT EXISTS "document" (
 	"device"  TEXT(255),
 	"device_id"  TEXT(255),
 	"timestamp"  INTEGER
-);`
+);
+CREATE UNIQUE INDEX IF NOT EXISTS username_documentid ON document(username,documentid);
+`
 
 var (
 	db     *sqlx.DB
 	dbname string
 )
 
-type dbUser struct {
+type DbUser struct {
 	Username string `db:"username"`
 	Password string `db:"password"`
 }
 
-type dbDocument struct {
+type DbDocument struct {
 	Username   string  `db:"username"`
 	DocumentID string  `db:"documentid"`
 	Percentage float64 `db:"percentage"`
 	Progress   string  `db:"progress"`
 	Device     string  `db:"device"`
-	DeviceID   string  `db:"device_id"`
+	DeviceId   string  `db:"device_id"`
 	Timestamp  int64   `db:"timestamp"`
 }
 
@@ -56,87 +59,62 @@ func initDB() {
 	db.MustExec(schemaDocument)
 }
 
-func getDBUser(username string) (dbUser, bool) {
-	var result dbUser
-	var norows bool = false
-	err := db.Get(&result, "SELECT * FROM user WHERE username=$1", username)
+func getDBUser(username string) (DbUser, bool) {
+	var user DbUser
+	var noRows = false
+	err := db.Get(&user, "SELECT * FROM user WHERE username=$1", username)
 	if err != nil {
 		log.Println(err)
 		if err == sql.ErrNoRows {
-			norows = true
+			noRows = true
 		}
 	}
-	return result, norows
+	return user, noRows
 }
 
 func addDBUser(username string, password string) bool {
-	_, norows := getDBUser(username)
-	if norows {
-		tx := db.MustBegin()
-		tx.MustExec("INSERT INTO user (username, password) VALUES ($1, $2)", username, password)
-		tx.Commit()
-		return true
-	}
-	return false
+	// Unique constraint will cause error if username already exists
+	_, err := db.Exec("INSERT INTO user (username, password) VALUES ($1, $2)", username, password)
+	return err == nil
 }
 
-func getDBPosition(username string, documentid string) (requestPosition, error) {
-	var rPos requestPosition
-	var resultDBdoc dbDocument
-	err := db.Get(&resultDBdoc, "SELECT * FROM document WHERE document.username=$1 AND document.documentid=$2 ORDER BY document.timestamp DESC", username, documentid)
+func getDBDocument(username string, documentId string) (Document, error) {
+	var document Document
+	var dbDocument DbDocument
+	err := db.Get(&dbDocument, "SELECT * FROM document WHERE document.username=$1 AND document.documentid=$2 ORDER BY document.timestamp DESC", username, documentId)
 	if err != nil {
 		log.Println(err)
-		return rPos, err
+		return document, err
 	}
-	rPos.Timestamp = resultDBdoc.Timestamp
-	rPos.DocumentID = documentid
-	rPos.Percentage = resultDBdoc.Percentage
-	rPos.Progress = stringOrInt{resultDBdoc.Progress}
-	rPos.Device = resultDBdoc.Device
-	rPos.DeviceID = resultDBdoc.DeviceID
-	return rPos, err
+	document.Timestamp = dbDocument.Timestamp
+	document.DocumentId = documentId
+	document.Percentage = dbDocument.Percentage
+	document.Progress = &StringOrInt{dbDocument.Progress}
+	document.Device = dbDocument.Device
+	document.DeviceId = dbDocument.DeviceId
+	return document, nil
 }
 
-func existDoc(username string, docid string) bool {
-	var result dbDocument
-	err := db.Get(&result, "SELECT * FROM document WHERE username=$1 AND documentid=$2", username, docid)
-	if err != nil {
-		log.Println(err)
-		if err == sql.ErrNoRows {
-			return false
-		}
-	}
-	return true
-}
-
-func updateDBdocument(username string, rPos requestPosition) int64 {
-	nowtime := time.Now().Unix()
-	if existDoc(username, rPos.DocumentID) {
-		_, err := db.NamedExec("UPDATE document set percentage=:perc, progress=:prog, device=:device, device_id=:devid, timestamp=:time WHERE username=:user AND documentid=:docid", map[string]interface{}{
-			"perc":   rPos.Percentage,
-			"prog":   rPos.Progress.inner,
-			"device": rPos.Device,
-			"devid":  rPos.DeviceID,
-			"time":   nowtime,
-			"user":   username,
-			"docid":  rPos.DocumentID,
+func updateDBDocument(username string, document Document) int64 {
+	now := time.Now().Unix()
+	_, err := db.NamedExec(
+		`
+			INSERT INTO document (username, documentid, percentage, progress, device, device_id, timestamp)
+			VALUES (:user, :docid, :perc, :prog, :dev, :devid, :time)
+			ON CONFLICT(username, documentid)
+			DO UPDATE SET percentage=:perc, progress=:prog, device=:dev, device_id=:devid, timestamp=:time
+		`,
+		map[string]interface{}{
+			"user":  username,
+			"docid": document.DocumentId,
+			"perc":  document.Percentage,
+			"prog":  document.Progress.inner,
+			"dev":   document.Device,
+			"devid": document.DeviceId,
+			"time":  now,
 		})
-		if err != nil {
-			log.Fatalln(err)
-		}
-		return nowtime
-	}
-	_, err := db.NamedExec("INSERT INTO document (username, documentid, percentage, progress, device, device_id, timestamp) VALUES (:user, :docid, :perc, :prog, :dev, :devid, :time)", map[string]interface{}{
-		"user":  username,
-		"docid": rPos.DocumentID,
-		"perc":  rPos.Percentage,
-		"prog":  rPos.Progress.inner,
-		"dev":   rPos.Device,
-		"devid": rPos.DeviceID,
-		"time":  nowtime,
-	})
 	if err != nil {
 		log.Fatalln(err)
 	}
-	return nowtime
+	return now
 }

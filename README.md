@@ -1,10 +1,10 @@
 # kosyncsrv
 a tiny koreader sync server rewritten by golang according to
 [koreader-sync](https://github.com/myelsukov/koreader-sync),
-it uses sqlite3 file as the database by default, tables will be auto created while the programm runs
+it uses sqlite3 file as the database by default, tables will be auto created while the program runs
 
 ## build and run
-if you are using the newer go version with modle
+if you are using the newer go version with module
 ```
 CGO_ENABLED=1   //sqlite3 needs it
 go mod init kosyncsrv
