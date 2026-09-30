@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 var schemaUser = `
@@ -51,7 +51,7 @@ type DbDocument struct {
 
 func initDB() {
 	var err error
-	db, err = sqlx.Connect("sqlite3", dbname)
+	db, err = sqlx.Connect("sqlite", dbname)
 	if err != nil {
 		log.Fatalln(err)
 	}

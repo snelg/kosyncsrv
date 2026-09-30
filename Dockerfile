@@ -1,7 +1,4 @@
-FROM golang:alpine AS builder
-
-RUN apk add --no-cache sqlite-libs sqlite-dev
-RUN apk add --no-cache build-base git
+FROM golang:latest AS builder
 
 WORKDIR /app
 
@@ -10,13 +7,18 @@ COPY go.sum ./
 RUN go mod download
 COPY . ./
 
-RUN CGO_ENABLED=1 go build -o /kosyncsrv
+RUN CGO_ENABLED=0 go build -o /kosyncsrv
 
-FROM alpine
+FROM scratch
 
 VOLUME /data
 WORKDIR /data
 
 COPY --from=builder /kosyncsrv /
 
-ENTRYPOINT "/kosyncsrv"
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+EXPOSE 8080
+
+ENTRYPOINT ["/kosyncsrv"]
