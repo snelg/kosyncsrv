@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,6 +40,7 @@ func main() {
 
 	wrappedMux := acceptHeaderCheck(mux)
 
+	fmt.Println("starting server:", serverAddr)
 	var err error
 	if *useSSL {
 		err = http.ListenAndServeTLS(serverAddr, *sslCertFile, *sslKeyFile, wrappedMux)
@@ -48,7 +48,7 @@ func main() {
 		err = http.ListenAndServe(serverAddr, wrappedMux)
 	}
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("server stop", "error", err)
+		fmt.Println("server stop:", err)
 	}
 }
 
