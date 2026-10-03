@@ -4,10 +4,16 @@ WORKDIR /app
 
 COPY go.mod ./
 COPY go.sum ./
-RUN go mod download
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
 COPY . ./
 
-RUN CGO_ENABLED=0 go build -o /kosyncsrv
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -o /kosyncsrv
 
 FROM scratch
 
